@@ -7,8 +7,15 @@
 #define Height 240
 #define Width 240
 
-TFT_eSPI tft = TFT_eSPI();
+// Number of displays you have
+#define NUM_DISPLAYS 5
+// Define a CS pin for each display. 
+// (For your first display, use the one already defined (15), and add new ones for additional displays)
+const int CS_PINS[NUM_DISPLAYS] = { 13, 33, 32, 25, 21};
 
+TFT_eSPI tft = TFT_eSPI();  // Single instance for all displays (using the shared SPI bus)
+
+// Structure for incoming ESP-NOW data
 typedef struct struct_message {
     float speed;
     float rpm;
@@ -19,6 +26,7 @@ typedef struct struct_message {
 
 struct_message myData;
 
+// ESP-NOW callback to receive data and update myData
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     memcpy(&myData, incomingData, sizeof(myData));
 
@@ -34,47 +42,59 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
     Serial.println(myData.gear);
 }
 
-void setup() {
-    Serial.begin(115200);
-    WiFi.mode(WIFI_STA);
-    tft.begin();
-    tft.setRotation(0);
+// Function to update a specific display.
+// The parameter 'index' selects which CS pin (and thus display) to update.
+// The function clears the display, sets up the text style, then draws the label and value.
+void updateDisplay(int index, const char* label, float value) {
+    // Select the display by pulling its CS LOW
+    digitalWrite(CS_PINS[index], LOW);
+    
+    // Update display content
     tft.fillScreen(TFT_BLACK);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextDatum(MC_DATUM);
     tft.setFreeFont(&FreeSansBold24pt7b);
-    tft.setTextPadding(250);
+    tft.drawString(label, Width / 2, Height / 3);
+    tft.drawFloat(value, 2, Width / 2, Height / 2);
+    
+    // Deselect the display
+    digitalWrite(CS_PINS[index], HIGH);
+}
 
+void setup() {
+    Serial.begin(115200);
+    WiFi.mode(WIFI_STA);
+
+    tft.begin();
+    tft.setRotation(0);
+
+    // Initialize each CS pin as an OUTPUT and clear each display
+    for (int i = 0; i < NUM_DISPLAYS; i++) {
+        pinMode(CS_PINS[i], OUTPUT);
+        // Initially, set the display deselected
+        digitalWrite(CS_PINS[i], HIGH);
+        
+        // Clear the display by selecting it, clearing, then deselecting it.
+        digitalWrite(CS_PINS[i], LOW);
+        tft.fillScreen(TFT_BLACK);
+        digitalWrite(CS_PINS[i], HIGH);
+    }
+
+    // Initialize ESP-NOW and register the receive callback
     if (esp_now_init() != ESP_OK) {
         Serial.println("Error initializing ESP-NOW");
         return;
     }
-
     esp_now_register_recv_cb(OnDataRecv);
 }
 
 void loop() {
-    if (myData.gear == 1)
-    {
-        tft.drawString("Speed:", Width / 2, Height / 3);
-        tft.drawFloat(myData.speed, 2, Width / 2, Height / 2);
-    }
-    else if (myData.gear == 2)
-    {
-        tft.drawString("RPM:", Width / 2, Height / 3);
-        tft.drawFloat(myData.rpm, 2, Width / 2, Height / 2);
-    }
-    else if (myData.gear == 3)
-    {
-        tft.drawString("Fuel%:", Width / 2, Height / 3);
-        tft.drawFloat(myData.fuel, 2, Width / 2, Height / 2);
-    }
-    else if (myData.gear == 4)
-    {
-        tft.drawString("Temp:", Width / 2, Height / 3);
-        tft.drawFloat(myData.temp, 2, Width / 2, Height / 2);
-    }
-    else 
-        tft.drawString("NoData:", Width / 2, Height / 2);
-        
+    // Each display shows a different field:
+    // Display 0: Speed, Display 1: RPM, Display 2: Fuel%, Display 3: Temp, Display 4: Gear
+    updateDisplay(0, "Speed:", myData.speed);
+    updateDisplay(1, "RPM:", myData.rpm);
+    updateDisplay(2, "Fuel%:", myData.fuel);
+    updateDisplay(3, "Temp:", myData.temp);
+    updateDisplay(4, "Gear:", int(myData.gear));
+
 }
